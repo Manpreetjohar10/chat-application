@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Real-Time Chat Rooms</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">ChatRooms</div>
+
+      <div class="user-section">
+        <input id="username" type="text" placeholder="Your name" />
+        <button id="save-username">Save</button>
+      </div>
+
+      <div class="room-create">
+        <input id="room-input" type="text" placeholder="Create or join room" />
+        <button id="join-room">Join</button>
+      </div>
+
+      <div class="rooms-header">Available rooms</div>
+      <ul id="rooms" class="rooms-list">
+        <!-- Dynamic room list -->
+      </ul>
+    </aside>
+
+    <main class="chat">
+      <header class="chat-header">
+        <div class="room-title" id="current-room">No room joined</div>
+        <div class="participants" id="participants">0 online</div>
+      </header>
+
+      <section id="messages" class="messages">
+        <!-- Messages appear here -->
+      </section>
+
+      <section class="composer">
+        <input id="message" type="text" placeholder="Type a message..." />
+        <button id="send">Send</button>
+      </section>
+
+      <div id="typing" class="typing-indicator"></div>
+    </main>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
