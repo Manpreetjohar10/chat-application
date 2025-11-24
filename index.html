@@ -1,30 +1,40 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Real-Time Chat Rooms</title>
+  <title>Secure Chat Rooms</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- Auth modal -->
+  <div id="auth-modal" class="modal">
+    <div class="modal-content">
+      <h2>Choose a username</h2>
+      <p class="muted">Usernames must be unique and 3–20 characters.</p>
+      <input id="auth-username" type="text" placeholder="e.g., Manpreet" maxlength="20" />
+      <button id="auth-submit">Continue</button>
+      <div id="auth-error" class="error"></div>
+    </div>
+  </div>
+
   <div class="app">
     <aside class="sidebar">
       <div class="brand">ChatRooms</div>
 
-      <div class="user-section">
-        <input id="username" type="text" placeholder="Your name" />
-        <button id="save-username">Save</button>
+      <div class="user-info">
+        <span id="user-display"></span>
+        <button id="logout">Logout</button>
       </div>
 
       <div class="room-create">
-        <input id="room-input" type="text" placeholder="Create or join room" />
+        <input id="room-input" type="text" placeholder="Create or join room" maxlength="30" />
         <button id="join-room">Join</button>
       </div>
 
       <div class="rooms-header">Available rooms</div>
-      <ul id="rooms" class="rooms-list">
-        <!-- Dynamic room list -->
-      </ul>
+      <ul id="rooms" class="rooms-list"></ul>
     </aside>
 
     <main class="chat">
@@ -33,12 +43,10 @@
         <div class="participants" id="participants">0 online</div>
       </header>
 
-      <section id="messages" class="messages">
-        <!-- Messages appear here -->
-      </section>
+      <section id="messages" class="messages"></section>
 
       <section class="composer">
-        <input id="message" type="text" placeholder="Type a message..." />
+        <input id="message" type="text" placeholder="Type a message... Use **bold**, *italics*, or links https://example.com" maxlength="500" />
         <button id="send">Send</button>
       </section>
 

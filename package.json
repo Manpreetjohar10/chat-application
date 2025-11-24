@@ -1,7 +1,7 @@
 {
   "name": "chatboat",
   "version": "1.0.0",
-  "description": "",
+  "description": "A real-time chat application built with **HTML, CSS, JavaScript, Node.js, and Socket.IO**.  \r Users can create or join chat rooms, choose unique usernames, and exchange messages instantly.",
   "main": "script.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",

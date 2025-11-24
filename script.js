@@ -1,10 +1,17 @@
 
-const socket =  io()// auto connects to same origin
+const socket = io();
+
+const authModal = document.getElementById("auth-modal");
+const authUsername = document.getElementById("auth-username");
+const authSubmit = document.getElementById("auth-submit");
+const authError = document.getElementById("auth-error");
+
+const userDisplay = document.getElementById("user-display");
+const logoutBtn = document.getElementById("logout");
+
 const roomsEl = document.getElementById("rooms");
 const roomInput = document.getElementById("room-input");
 const joinRoomBtn = document.getElementById("join-room");
-const usernameEl = document.getElementById("username");
-const saveUsernameBtn = document.getElementById("save-username");
 
 const currentRoomEl = document.getElementById("current-room");
 const participantsEl = document.getElementById("participants");
@@ -14,26 +21,78 @@ const typingEl = document.getElementById("typing");
 const messageEl = document.getElementById("message");
 const sendBtn = document.getElementById("send");
 
-let username = "";
+let username = null;
 let currentRoom = null;
 
-// Save username
-saveUsernameBtn.addEventListener("click", () => {
-  const name = usernameEl.value.trim();
-  if (!name) return;
-  username = name;
-  saveUsernameBtn.textContent = "Saved";
-  saveUsernameBtn.disabled = true;
+// Basic sanitizer + markdown-lite formatter: **bold**, *italics*, links
+function sanitize(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+function formatMessage(text) {
+  let safe = sanitize(text);
+  // Bold: **text**
+  safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // Italics: *text*
+  safe = safe.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  // Links: http(s)://...
+  safe = safe.replace(/\bhttps?:\/\/[^\s]+/g, (url) => {
+    const u = url.substring(0, 200); // guard length
+    return `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`;
+  });
+  return safe;
+}
+
+function showAuth() {
+  authModal.style.display = "grid";
+  authUsername.focus();
+}
+function hideAuth() {
+  authModal.style.display = "none";
+}
+
+function validateUsername(name) {
+  const n = name.trim();
+  if (n.length < 3 || n.length > 20) return "Username must be 3–20 characters.";
+  if (!/^[a-zA-Z0-9_]+$/.test(n)) return "Use letters, numbers, or underscore only.";
+  return null;
+}
+
+authSubmit.addEventListener("click", () => {
+  const name = authUsername.value.trim();
+  const err = validateUsername(name);
+  if (err) { authError.textContent = err; return; }
+
+  socket.emit("auth:claim", { username: name }, (res) => {
+    if (!res.ok) {
+      authError.textContent = res.error || "Username unavailable.";
+      return;
+    }
+    username = name;
+    userDisplay.textContent = `Signed in as ${username}`;
+    hideAuth();
+    socket.emit("rooms:list");
+  });
 });
 
-// Join room via input
+logoutBtn.addEventListener("click", () => {
+  socket.emit("auth:release", { username });
+  username = null;
+  currentRoom = null;
+  currentRoomEl.textContent = "No room joined";
+  participantsEl.textContent = "0 online";
+  messagesEl.innerHTML = "";
+  typingEl.textContent = "";
+  showAuth();
+});
+
+// Rooms: create/join
 joinRoomBtn.addEventListener("click", () => {
   const room = roomInput.value.trim();
   if (!room) return;
   joinRoom(room);
 });
-
-// Join room via list click
 roomsEl.addEventListener("click", (e) => {
   const li = e.target.closest("li[data-room]");
   if (!li) return;
@@ -41,24 +100,23 @@ roomsEl.addEventListener("click", (e) => {
 });
 
 function joinRoom(room) {
-  if (!username) {
-    alert("Please set your name first.");
-    return;
-  }
-  if (currentRoom) socket.emit("leaveRoom", { room: currentRoom, username });
+  if (!username) { showAuth(); return; }
+  if (currentRoom) socket.emit("room:leave", { room: currentRoom, username });
 
-  socket.emit("joinRoom", { room, username });
-  currentRoom = room;
-  currentRoomEl.textContent = room;
-  messagesEl.innerHTML = "";
-  typingEl.textContent = "";
-  highlightActiveRoom(room);
+  socket.emit("room:join", { room, username }, (res) => {
+    if (!res.ok) return alert(res.error || "Could not join room.");
+    currentRoom = room;
+    currentRoomEl.textContent = room;
+    messagesEl.innerHTML = "";
+    typingEl.textContent = "";
+    highlightActiveRoom(room);
+  });
 }
 
 function highlightActiveRoom(room) {
-  [...roomsEl.querySelectorAll("li")].forEach(li => {
-    li.classList.toggle("active", li.dataset.room === room);
-  });
+  [...roomsEl.querySelectorAll("li")].forEach(li =>
+    li.classList.toggle("active", li.dataset.room === room)
+  );
 }
 
 // Send message
@@ -66,33 +124,33 @@ sendBtn.addEventListener("click", sendMessage);
 messageEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendMessage();
 });
-
 function sendMessage() {
-  const text = messageEl.value.trim();
-  if (!text || !currentRoom || !username) return;
-  socket.emit("chat", { room: currentRoom, username, message: text });
-  addMessage({ username, message: text }, true);
+  const raw = messageEl.value.trim();
+  if (!raw || !currentRoom || !username) return;
+  socket.emit("chat:send", { room: currentRoom, username, message: raw });
+  addMessage({ username, message: raw, ts: Date.now() }, true);
   messageEl.value = "";
 }
 
-// Typing indicator
+// Typing
 messageEl.addEventListener("input", () => {
   if (!currentRoom || !username) return;
-  socket.emit("typing", { room: currentRoom, username });
+  socket.emit("chat:typing", { room: currentRoom, username });
 });
 
 // Render message
 function addMessage(data, isMe = false) {
   const wrap = document.createElement("div");
   wrap.className = "message" + (isMe ? " me" : "");
+
   const meta = document.createElement("div");
   meta.className = "meta";
-  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time = new Date(data.ts || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  meta.innerHTML = `<span>${sanitize(data.username)}</span><span>${time}</span>`;
 
-  meta.innerHTML = `<span>${data.username}</span><span>${time}</span>`;
   const content = document.createElement("div");
   content.className = "content";
-  content.textContent = data.message;
+  content.innerHTML = formatMessage(data.message);
 
   wrap.appendChild(meta);
   wrap.appendChild(content);
@@ -100,7 +158,6 @@ function addMessage(data, isMe = false) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// System message
 function addSystem(text) {
   const wrap = document.createElement("div");
   wrap.className = "message system";
@@ -109,30 +166,31 @@ function addSystem(text) {
 }
 
 // Socket events
-socket.on("rooms", (list) => {
+socket.on("rooms:update", (list) => {
   roomsEl.innerHTML = "";
   list.forEach(({ name, count }) => {
     const li = document.createElement("li");
     li.dataset.room = name;
-    li.innerHTML = `<span>${name}</span><span class="count">${count} online</span>`;
+    li.innerHTML = `<span>${sanitize(name)}</span><span class="count">${count} online</span>`;
     roomsEl.appendChild(li);
   });
 });
 
-socket.on("chat", (data) => {
+socket.on("chat:message", (data) => {
   addMessage(data, data.username === username);
 });
 
-socket.on("typing", (data) => {
+socket.on("chat:typing", (data) => {
   if (data.room !== currentRoom) return;
-  typingEl.textContent = `${data.username} is typing...`;
-  setTimeout(() => {
-    typingEl.textContent = "";
-  }, 1200);
+  typingEl.textContent = `${sanitize(data.username)} is typing...`;
+  setTimeout(() => { typingEl.textContent = ""; }, 1000);
 });
 
-socket.on("system", (data) => {
+socket.on("room:system", (data) => {
   if (data.room !== currentRoom) return;
   addSystem(data.message);
   participantsEl.textContent = `${data.count} online`;
 });
+
+// Initial
+showAuth();
