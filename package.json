@@ -1,28 +1,9 @@
 {
-    "name":  "chatboat",
-    "version":  "1.0.0",
-    "description":  "A real-time chat application built with **HTML, CSS, JavaScript, Node.js, and Socket.IO**.  \r Users can create or join chat rooms, choose unique usernames, and exchange messages instantly.",
-    "main":  "server.js",
-    "scripts":  {
-                    "test":  "echo \"Error: no test specified\" \u0026\u0026 exit 1",
-                    "start":  "node server.js"
-                },
-    "keywords":  [
-
-                 ],
-    "author":  "",
-    "license":  "ISC",
-    "type":  "commonjs",
-    "dependencies":  {
-                         "express":  "^5.1.0",
-                         "socket.io":  "^4.8.1"
-                     },
-    "repository":  {
-                       "type":  "git",
-                       "url":  "git+https://github.com/Manpreetjohar10/chat-boat-web-page-.git"
-                   },
-    "bugs":  {
-                 "url":  "https://github.com/Manpreetjohar10/chat-boat-web-page-/issues"
-             },
-    "homepage":  "https://github.com/Manpreetjohar10/chat-boat-web-page-#readme"
+  "name": "chatboat",
+  "version": "1.0.0",
+  "description": "Realtime chat app using Firebase Realtime Database",
+  "private": true,
+  "scripts": {
+    "build:config": "node scripts/generate-firebase-config.js"
+  }
 }
