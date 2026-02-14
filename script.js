@@ -42,7 +42,7 @@ if (isFirebaseConfigured(firebaseConfig)) {
   watchConnectionState();
   watchRooms();
 } else {
-  setConnectionStatus("Set FIREBASE_CONFIG in index.html.");
+  setConnectionStatus("Set valid values in firebase-config.js (or Netlify env vars).")
 }
 
 function getOrCreateClientId() {
@@ -59,8 +59,7 @@ function isFirebaseConfigured(config) {
   return Boolean(
     config.apiKey &&
       config.apiKey !== "REPLACE_ME" &&
-      config.databaseURL &&
-      config.databaseURL.includes("firebaseio.com")
+      config.databaseURL && /firebaseio\.com|firebasedatabase\.app/.test(config.databaseURL)
   );
 }
 
@@ -435,3 +434,4 @@ window.addEventListener("beforeunload", () => {
 });
 
 showAuth();
+

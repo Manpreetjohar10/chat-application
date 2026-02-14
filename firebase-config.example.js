@@ -1,9 +1,9 @@
 window.FIREBASE_CONFIG = {
-  apiKey: "REPLACE_ME",
-  authDomain: "REPLACE_ME.firebaseapp.com",
-  databaseURL: "https://REPLACE_ME-default-rtdb.firebaseio.com",
-  projectId: "REPLACE_ME",
-  storageBucket: "REPLACE_ME.appspot.com",
-  messagingSenderId: "REPLACE_ME",
-  appId: "REPLACE_ME"
+  apiKey: "AIzaSyDmf_yh2tse2JXCKnBc0EHlPCfPnumfboE",
+  authDomain: "chat-application-fb73d.firebaseapp.com",
+  projectId: "chat-application-fb73d",
+  storageBucket: "chat-application-fb73d.firebasestorage.app",
+  messagingSenderId: "871947458329",
+  appId: "1:871947458329:web:5bd50fee6f939052a3d788",
+  measurementId: "G-Z22DRJPMH9"
 };
