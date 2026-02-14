@@ -1,15 +1,3 @@
-function resolveSocketServerUrl() {
-  const configured = String(window.CHAT_SERVER_URL || "").trim().replace(/\/+$/, "");
-  if (configured) return configured;
-  return window.location.origin;
-}
-
-const socketServerUrl = resolveSocketServerUrl();
-const socket = io(socketServerUrl, {
-  transports: ["websocket", "polling"],
-  withCredentials: true
-});
-
 const authModal = document.getElementById("auth-modal");
 const authUsername = document.getElementById("auth-username");
 const authSubmit = document.getElementById("auth-submit");
@@ -33,38 +21,77 @@ const sendBtn = document.getElementById("send");
 
 let username = null;
 let currentRoom = null;
+let usernameClaimRef = null;
+let userRef = null;
+let memberRef = null;
+let myTypingRef = null;
+let typingTimeout = null;
 
-// Basic sanitizer + markdown-lite formatter: **bold**, *italics*, links
-function sanitize(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
+let roomMessagesRef = null;
+let roomMembersRef = null;
+let roomTypingRef = null;
+
+const uid = getOrCreateClientId();
+const firebaseConfig = window.FIREBASE_CONFIG || {};
+let app = null;
+let db = null;
+
+if (isFirebaseConfigured(firebaseConfig)) {
+  app = firebase.initializeApp(firebaseConfig);
+  db = firebase.database(app);
+  watchConnectionState();
+  watchRooms();
+} else {
+  setConnectionStatus("Set FIREBASE_CONFIG in index.html.");
 }
-function formatMessage(text) {
-  let safe = sanitize(text);
-  // Bold: **text**
-  safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  // Italics: *text*
-  safe = safe.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  // Links: http(s)://...
-  safe = safe.replace(/\bhttps?:\/\/[^\s]+/g, (url) => {
-    const u = url.substring(0, 200); // guard length
-    return `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`;
-  });
-  return safe;
+
+function getOrCreateClientId() {
+  const key = "chat_client_id";
+  let value = localStorage.getItem(key);
+  if (!value) {
+    value = `u_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    localStorage.setItem(key, value);
+  }
+  return value;
+}
+
+function isFirebaseConfigured(config) {
+  return Boolean(
+    config.apiKey &&
+      config.apiKey !== "REPLACE_ME" &&
+      config.databaseURL &&
+      config.databaseURL.includes("firebaseio.com")
+  );
+}
+
+function setConnectionStatus(text) {
+  connectionStatus.textContent = text || "";
 }
 
 function showAuth() {
   authModal.style.display = "grid";
   authUsername.focus();
 }
+
 function hideAuth() {
   authModal.style.display = "none";
 }
 
-function setConnectionStatus(text) {
-  if (!connectionStatus) return;
-  connectionStatus.textContent = text || "";
+function sanitize(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function formatMessage(text) {
+  let safe = sanitize(text);
+  safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  safe = safe.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  safe = safe.replace(/\bhttps?:\/\/[^\s]+/g, (url) => {
+    const u = url.substring(0, 200);
+    return `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`;
+  });
+  return safe;
 }
 
 function validateUsername(name) {
@@ -74,98 +101,248 @@ function validateUsername(name) {
   return null;
 }
 
-authSubmit.addEventListener("click", () => {
-  const name = authUsername.value.trim();
-  const err = validateUsername(name);
-  if (err) { authError.textContent = err; return; }
+function validateRoom(name) {
+  const n = String(name || "").trim();
+  if (n.length < 1 || n.length > 30) return false;
+  return /^[\w-]+$/.test(n);
+}
 
-  socket.emit("auth:claim", { username: name }, (res) => {
-    if (!res.ok) {
-      authError.textContent = res.error || "Username unavailable.";
+function watchConnectionState() {
+  db.ref(".info/connected").on("value", (snapshot) => {
+    const connected = snapshot.val() === true;
+    if (!connected) {
+      setConnectionStatus("Disconnected from realtime service.");
       return;
     }
-    username = name;
-    userDisplay.textContent = `Signed in as ${username}`;
-    hideAuth();
-    socket.emit("rooms:list");
+    if (!isFirebaseConfigured(firebaseConfig)) return;
+    setConnectionStatus("");
   });
-});
+}
 
-logoutBtn.addEventListener("click", () => {
-  socket.emit("auth:release", { username });
-  username = null;
+function claimUsername(requestedName) {
+  return new Promise((resolve, reject) => {
+    const usernameKey = requestedName.toLowerCase();
+    const claimRef = db.ref(`usernames/${usernameKey}`);
+
+    claimRef.transaction(
+      (current) => {
+        if (current === null || current.uid === uid) {
+          return { uid, username: requestedName };
+        }
+        return;
+      },
+      (error, committed, snapshot) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        if (!committed) {
+          resolve({ ok: false, error: "Username already in use." });
+          return;
+        }
+
+        usernameClaimRef = claimRef;
+        usernameClaimRef.onDisconnect().remove();
+
+        userRef = db.ref(`users/${uid}`);
+        userRef.set({ username: requestedName, room: null, updatedAt: firebase.database.ServerValue.TIMESTAMP });
+        userRef.onDisconnect().remove();
+
+        resolve({ ok: true, claimedUsername: snapshot.val().username });
+      },
+      false
+    );
+  });
+}
+
+function releaseUsername() {
+  if (usernameClaimRef) {
+    usernameClaimRef.remove();
+    usernameClaimRef = null;
+  }
+}
+
+function leaveCurrentRoom() {
+  if (memberRef) {
+    memberRef.remove();
+    memberRef = null;
+  }
+  if (myTypingRef) {
+    myTypingRef.remove();
+    myTypingRef = null;
+  }
+  if (userRef) {
+    userRef.child("room").set(null);
+  }
+
+  detachRoomSubscriptions();
   currentRoom = null;
   currentRoomEl.textContent = "No room joined";
   participantsEl.textContent = "0 online";
-  messagesEl.innerHTML = "";
   typingEl.textContent = "";
-  showAuth();
-});
+}
 
-// Rooms: create/join
-joinRoomBtn.addEventListener("click", () => {
-  const room = roomInput.value.trim();
-  if (!room) return;
-  joinRoom(room);
-});
-roomsEl.addEventListener("click", (e) => {
-  const li = e.target.closest("li[data-room]");
-  if (!li) return;
-  joinRoom(li.dataset.room);
-});
+function detachRoomSubscriptions() {
+  if (roomMessagesRef) {
+    roomMessagesRef.off();
+    roomMessagesRef = null;
+  }
+  if (roomMembersRef) {
+    roomMembersRef.off();
+    roomMembersRef = null;
+  }
+  if (roomTypingRef) {
+    roomTypingRef.off();
+    roomTypingRef = null;
+  }
+}
 
-function joinRoom(room) {
-  if (!username) { showAuth(); return; }
-  if (currentRoom) socket.emit("room:leave", { room: currentRoom, username });
+function watchRooms() {
+  db.ref("rooms").on("value", (snapshot) => {
+    const rooms = [];
+    snapshot.forEach((roomSnap) => {
+      const name = roomSnap.key;
+      const members = roomSnap.child("members").val() || {};
+      const count = Object.keys(members).length;
+      rooms.push({ name, count });
+    });
 
-  socket.emit("room:join", { room, username }, (res) => {
-    if (!res.ok) return alert(res.error || "Could not join room.");
-    currentRoom = room;
-    currentRoomEl.textContent = room;
-    messagesEl.innerHTML = "";
-    typingEl.textContent = "";
-    highlightActiveRoom(room);
+    rooms.sort((a, b) => a.name.localeCompare(b.name));
+    roomsEl.innerHTML = "";
+
+    rooms.forEach(({ name, count }) => {
+      const li = document.createElement("li");
+      li.dataset.room = name;
+      li.innerHTML = `<span>${sanitize(name)}</span><span class="count">${count} online</span>`;
+      if (name === currentRoom) li.classList.add("active");
+      roomsEl.appendChild(li);
+    });
   });
 }
 
+function subscribeRoom(room) {
+  roomMessagesRef = db.ref(`rooms/${room}/messages`).limitToLast(200);
+  roomMessagesRef.on("child_added", (snapshot) => {
+    const data = snapshot.val() || {};
+    addMessage(data, data.uid === uid);
+  });
+
+  roomMembersRef = db.ref(`rooms/${room}/members`);
+  roomMembersRef.on("value", (snapshot) => {
+    const members = snapshot.val() || {};
+    participantsEl.textContent = `${Object.keys(members).length} online`;
+  });
+
+  roomMembersRef.on("child_added", (snapshot) => {
+    if (snapshot.key === uid) return;
+    const name = String(snapshot.val() || "Someone");
+    addSystem(`${name} joined`);
+  });
+
+  roomMembersRef.on("child_removed", (snapshot) => {
+    if (snapshot.key === uid) return;
+    const name = String(snapshot.val() || "Someone");
+    addSystem(`${name} left`);
+  });
+
+  roomTypingRef = db.ref(`rooms/${room}/typing`);
+  roomTypingRef.on("value", (snapshot) => {
+    const all = snapshot.val() || {};
+    const names = Object.entries(all)
+      .filter(([key]) => key !== uid)
+      .map(([, value]) => String(value || ""))
+      .filter(Boolean);
+
+    if (names.length === 0) {
+      typingEl.textContent = "";
+      return;
+    }
+    typingEl.textContent = `${sanitize(names[0])} is typing...`;
+  });
+}
+
+function joinRoom(room) {
+  if (!db || !username) return;
+  if (!validateRoom(room)) {
+    alert("Invalid room name.");
+    return;
+  }
+
+  if (currentRoom === room) return;
+
+  leaveCurrentRoom();
+  currentRoom = room;
+
+  messagesEl.innerHTML = "";
+  currentRoomEl.textContent = room;
+
+  memberRef = db.ref(`rooms/${room}/members/${uid}`);
+  memberRef.set(username);
+  memberRef.onDisconnect().remove();
+
+  myTypingRef = db.ref(`rooms/${room}/typing/${uid}`);
+  myTypingRef.onDisconnect().remove();
+
+  if (userRef) {
+    userRef.child("room").set(room);
+    userRef.child("updatedAt").set(firebase.database.ServerValue.TIMESTAMP);
+  }
+
+  subscribeRoom(room);
+  highlightActiveRoom(room);
+}
+
 function highlightActiveRoom(room) {
-  [...roomsEl.querySelectorAll("li")].forEach(li =>
-    li.classList.toggle("active", li.dataset.room === room)
-  );
+  [...roomsEl.querySelectorAll("li")].forEach((li) => {
+    li.classList.toggle("active", li.dataset.room === room);
+  });
 }
 
-// Send message
-sendBtn.addEventListener("click", sendMessage);
-messageEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") sendMessage();
-});
 function sendMessage() {
+  if (!db || !currentRoom || !username) return;
+
   const raw = messageEl.value.trim();
-  if (!raw || !currentRoom || !username) return;
-  socket.emit("chat:send", { room: currentRoom, username, message: raw });
-  addMessage({ username, message: raw, ts: Date.now() }, true);
+  if (!raw || raw.length > 500) return;
+
+  const messageRef = db.ref(`rooms/${currentRoom}/messages`).push();
+  messageRef.set({
+    uid,
+    username,
+    message: raw,
+    ts: firebase.database.ServerValue.TIMESTAMP
+  });
+
   messageEl.value = "";
+  stopTyping();
 }
 
-// Typing
-messageEl.addEventListener("input", () => {
-  if (!currentRoom || !username) return;
-  socket.emit("chat:typing", { room: currentRoom, username });
-});
+function markTyping() {
+  if (!myTypingRef) return;
+  myTypingRef.set(username);
+  if (typingTimeout) clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(stopTyping, 1000);
+}
 
-// Render message
-function addMessage(data, isMe = false) {
+function stopTyping() {
+  if (!myTypingRef) return;
+  myTypingRef.remove();
+}
+
+function addMessage(data, isMe) {
   const wrap = document.createElement("div");
   wrap.className = "message" + (isMe ? " me" : "");
 
   const meta = document.createElement("div");
   meta.className = "meta";
-  const time = new Date(data.ts || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  meta.innerHTML = `<span>${sanitize(data.username)}</span><span>${time}</span>`;
+  const time = new Date(data.ts || Date.now()).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  meta.innerHTML = `<span>${sanitize(data.username || "Unknown")}</span><span>${time}</span>`;
 
   const content = document.createElement("div");
   content.className = "content";
-  content.innerHTML = formatMessage(data.message);
+  content.innerHTML = formatMessage(String(data.message || ""));
 
   wrap.appendChild(meta);
   wrap.appendChild(content);
@@ -180,52 +357,81 @@ function addSystem(text) {
   messagesEl.appendChild(wrap);
 }
 
-// Socket events
-socket.on("rooms:update", (list) => {
-  roomsEl.innerHTML = "";
-  list.forEach(({ name, count }) => {
-    const li = document.createElement("li");
-    li.dataset.room = name;
-    li.innerHTML = `<span>${sanitize(name)}</span><span class="count">${count} online</span>`;
-    roomsEl.appendChild(li);
-  });
-});
+async function handleLogin() {
+  if (!db) return;
 
-socket.on("chat:message", (data) => {
-  addMessage(data, data.username === username);
-});
-
-socket.on("chat:typing", (data) => {
-  if (data.room !== currentRoom) return;
-  typingEl.textContent = `${sanitize(data.username)} is typing...`;
-  setTimeout(() => { typingEl.textContent = ""; }, 1000);
-});
-
-socket.on("room:system", (data) => {
-  if (data.room !== currentRoom) return;
-  addSystem(data.message);
-  participantsEl.textContent = `${data.count} online`;
-});
-
-socket.on("connect", () => {
-  setConnectionStatus("");
-});
-
-socket.on("connect_error", (err) => {
-  const isNetlify = window.location.hostname.endsWith(".netlify.app");
-  const hasConfiguredServer = String(window.CHAT_SERVER_URL || "").trim().length > 0;
-
-  if (isNetlify && !hasConfiguredServer) {
-    setConnectionStatus("Set CHAT_SERVER_URL in index.html to your backend URL.");
+  const name = authUsername.value.trim();
+  const err = validateUsername(name);
+  if (err) {
+    authError.textContent = err;
     return;
   }
 
-  setConnectionStatus(`Connection failed: ${err.message}`);
+  authError.textContent = "";
+
+  try {
+    const result = await claimUsername(name);
+    if (!result.ok) {
+      authError.textContent = result.error || "Username unavailable.";
+      return;
+    }
+
+    username = result.claimedUsername;
+    userDisplay.textContent = `Signed in as ${username}`;
+    hideAuth();
+  } catch (error) {
+    authError.textContent = "Could not sign in. Try again.";
+    setConnectionStatus(`Login failed: ${error.message}`);
+  }
+}
+
+function handleLogout() {
+  leaveCurrentRoom();
+  releaseUsername();
+
+  if (userRef) {
+    userRef.remove();
+    userRef = null;
+  }
+
+  username = null;
+  userDisplay.textContent = "";
+  messagesEl.innerHTML = "";
+  roomsEl.querySelectorAll("li.active").forEach((li) => li.classList.remove("active"));
+  showAuth();
+}
+
+authSubmit.addEventListener("click", handleLogin);
+
+logoutBtn.addEventListener("click", handleLogout);
+
+joinRoomBtn.addEventListener("click", () => {
+  const room = roomInput.value.trim();
+  if (!room) return;
+  if (!username) {
+    showAuth();
+    return;
+  }
+  joinRoom(room);
 });
 
-socket.on("disconnect", (reason) => {
-  setConnectionStatus(`Disconnected: ${reason}`);
+roomsEl.addEventListener("click", (event) => {
+  const li = event.target.closest("li[data-room]");
+  if (!li || !username) return;
+  joinRoom(li.dataset.room);
 });
 
-// Initial
+sendBtn.addEventListener("click", sendMessage);
+messageEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") sendMessage();
+});
+messageEl.addEventListener("input", markTyping);
+
+window.addEventListener("beforeunload", () => {
+  stopTyping();
+  if (memberRef) memberRef.remove();
+  if (userRef) userRef.remove();
+  if (usernameClaimRef) usernameClaimRef.remove();
+});
+
 showAuth();
