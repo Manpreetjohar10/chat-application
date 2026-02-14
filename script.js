@@ -1,5 +1,12 @@
 
-const socket = io();
+function resolveSocketServerUrl() {
+  const configured = String(window.CHAT_SERVER_URL || "").trim();
+  return configured || window.location.origin;
+}
+
+const socket = io(resolveSocketServerUrl(), {
+  transports: ["websocket", "polling"]
+});
 
 const authModal = document.getElementById("auth-modal");
 const authUsername = document.getElementById("auth-username");

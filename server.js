@@ -6,7 +6,26 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+const allowedOrigins = String(process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const io = new Server(server, {
+  cors: {
+    origin: (origin, callback) => {
+      // Allow non-browser clients and local tools with no origin header.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error("CORS origin not allowed"));
+    },
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
 
 app.use(express.static(path.join(__dirname)));
 
