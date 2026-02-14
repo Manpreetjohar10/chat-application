@@ -1,17 +1,20 @@
-
 function resolveSocketServerUrl() {
-  const configured = String(window.CHAT_SERVER_URL || "").trim();
-  return configured || window.location.origin;
+  const configured = String(window.CHAT_SERVER_URL || "").trim().replace(/\/+$/, "");
+  if (configured) return configured;
+  return window.location.origin;
 }
 
-const socket = io(resolveSocketServerUrl(), {
-  transports: ["websocket", "polling"]
+const socketServerUrl = resolveSocketServerUrl();
+const socket = io(socketServerUrl, {
+  transports: ["websocket", "polling"],
+  withCredentials: true
 });
 
 const authModal = document.getElementById("auth-modal");
 const authUsername = document.getElementById("auth-username");
 const authSubmit = document.getElementById("auth-submit");
 const authError = document.getElementById("auth-error");
+const connectionStatus = document.getElementById("connection-status");
 
 const userDisplay = document.getElementById("user-display");
 const logoutBtn = document.getElementById("logout");
@@ -59,9 +62,14 @@ function hideAuth() {
   authModal.style.display = "none";
 }
 
+function setConnectionStatus(text) {
+  if (!connectionStatus) return;
+  connectionStatus.textContent = text || "";
+}
+
 function validateUsername(name) {
   const n = name.trim();
-  if (n.length < 3 || n.length > 20) return "Username must be 3–20 characters.";
+  if (n.length < 3 || n.length > 20) return "Username must be 3-20 characters.";
   if (!/^[a-zA-Z0-9_]+$/.test(n)) return "Use letters, numbers, or underscore only.";
   return null;
 }
@@ -197,6 +205,26 @@ socket.on("room:system", (data) => {
   if (data.room !== currentRoom) return;
   addSystem(data.message);
   participantsEl.textContent = `${data.count} online`;
+});
+
+socket.on("connect", () => {
+  setConnectionStatus("");
+});
+
+socket.on("connect_error", (err) => {
+  const isNetlify = window.location.hostname.endsWith(".netlify.app");
+  const hasConfiguredServer = String(window.CHAT_SERVER_URL || "").trim().length > 0;
+
+  if (isNetlify && !hasConfiguredServer) {
+    setConnectionStatus("Set CHAT_SERVER_URL in index.html to your backend URL.");
+    return;
+  }
+
+  setConnectionStatus(`Connection failed: ${err.message}`);
+});
+
+socket.on("disconnect", (reason) => {
+  setConnectionStatus(`Disconnected: ${reason}`);
 });
 
 // Initial

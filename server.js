@@ -7,9 +7,13 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 
+function normalizeOrigin(origin) {
+  return String(origin || "").trim().replace(/\/+$/, "");
+}
+
 const allowedOrigins = String(process.env.CORS_ORIGIN || "")
   .split(",")
-  .map((origin) => origin.trim())
+  .map((origin) => normalizeOrigin(origin))
   .filter(Boolean);
 
 const io = new Server(server, {
@@ -17,7 +21,8 @@ const io = new Server(server, {
     origin: (origin, callback) => {
       // Allow non-browser clients and local tools with no origin header.
       if (!origin) return callback(null, true);
-      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      const normalizedOrigin = normalizeOrigin(origin);
+      if (allowedOrigins.length === 0 || allowedOrigins.includes(normalizedOrigin)) {
         return callback(null, true);
       }
       return callback(new Error("CORS origin not allowed"));

@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,7 +11,7 @@
   <div id="auth-modal" class="modal">
     <div class="modal-content">
       <h2>Choose a username</h2>
-      <p class="muted">Usernames must be unique and 3–20 characters.</p>
+      <p class="muted">Usernames must be unique and 3-20 characters.</p>
       <input id="auth-username" type="text" placeholder="e.g., Manpreet" maxlength="20" />
       <button id="auth-submit">Continue</button>
       <div id="auth-error" class="error"></div>
@@ -51,12 +50,13 @@
       </section>
 
       <div id="typing" class="typing-indicator"></div>
+      <div id="connection-status" class="error" aria-live="polite"></div>
     </main>
   </div>
 
   <script>
-    // Set this on Netlify to your deployed backend, e.g. https://your-app.onrender.com
-    window.CHAT_SERVER_URL = "";
+    // Replace with your backend URL, e.g. https://your-app.onrender.com
+    window.CHAT_SERVER_URL = "https://REPLACE-WITH-YOUR-BACKEND.onrender.com";
   </script>
   <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
   <script src="script.js"></script>
